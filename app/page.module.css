@@ -1,0 +1,306 @@
+/* Based Turtle: ocean night palette + Base blue actions */
+
+.page {
+  --deep: #071a33;
+  --ocean: #0b3b75;
+  --base-blue: #0052ff;
+  --foam: #f2f8ff;
+  --foam-dim: rgba(242, 248, 255, 0.55);
+  --shell-green: #3ed598;
+  --aqua: #4cc9f0;
+  --amber: #ffc53d;
+
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 20px 28px;
+  max-width: 460px;
+  margin: 0 auto;
+  color: var(--foam);
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(0, 82, 255, 0.28) 0%, rgba(0, 82, 255, 0) 60%),
+    linear-gradient(180deg, var(--ocean) 0%, var(--deep) 70%);
+}
+
+.loading {
+  margin: auto;
+  font-size: 64px;
+  animation: bob 3s ease-in-out infinite;
+}
+
+/* ------------------------------ header ----------------------------- */
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wordmark {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.greeting {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--foam-dim);
+}
+
+.levelChip {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(242, 248, 255, 0.22);
+  background: rgba(242, 248, 255, 0.06);
+}
+
+/* ------------------------------ lagoon ----------------------------- */
+
+.lagoon {
+  position: relative;
+  align-self: center;
+  width: min(280px, 72vw);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(76, 201, 240, 0.35) 0%, rgba(0, 82, 255, 0.16) 55%, rgba(7, 26, 51, 0) 78%);
+}
+
+.lagoon::before,
+.lagoon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(76, 201, 240, 0.35);
+  animation: ripple 5s ease-out infinite;
+}
+
+.lagoon::after {
+  animation-delay: 2.5s;
+}
+
+.turtleButton {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.turtle {
+  display: inline-block;
+  line-height: 1;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.45));
+  animation: bob 3.4s ease-in-out infinite;
+}
+
+.turtleBounce {
+  animation: bounce 0.6s ease;
+}
+
+.mood {
+  text-align: center;
+  font-size: 15px;
+  color: var(--foam-dim);
+  min-height: 22px;
+}
+
+/* ------------------------------ stats ------------------------------ */
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.statRow {
+  display: grid;
+  grid-template-columns: 64px 1fr 32px;
+  align-items: center;
+  gap: 12px;
+}
+
+.statLabel {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--foam-dim);
+}
+
+.statValue {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 12px;
+  text-align: right;
+  color: var(--foam-dim);
+}
+
+.track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(242, 248, 255, 0.1);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.barFood {
+  background: var(--shell-green);
+}
+
+.barClean {
+  background: var(--aqua);
+}
+
+.barEnergy {
+  background: var(--amber);
+}
+
+/* ------------------------------ actions ---------------------------- */
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.actionButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  border: none;
+  border-radius: 16px;
+  background: var(--base-blue);
+  color: var(--foam);
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.actionButton:active {
+  transform: scale(0.96);
+}
+
+.actionButton:disabled {
+  background: rgba(242, 248, 255, 0.08);
+  color: var(--foam-dim);
+  cursor: default;
+  transform: none;
+}
+
+.actionButton:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: 2px;
+}
+
+.actionEmoji {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.actionLabel {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ------------------------------ footer ----------------------------- */
+
+.footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.xpRow {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--foam-dim);
+}
+
+.xpTrack {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(242, 248, 255, 0.1);
+  overflow: hidden;
+}
+
+.xpFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--base-blue), var(--aqua));
+  transition: width 0.4s ease;
+}
+
+/* ------------------------------ motion ----------------------------- */
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+@keyframes bounce {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.18) translateY(-10px);
+  }
+  70% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(0.62);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading,
+  .turtle,
+  .turtleBounce,
+  .lagoon::before,
+  .lagoon::after {
+    animation: none;
+  }
+}
