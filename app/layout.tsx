@@ -3,6 +3,7 @@ import { Inter, Source_Code_Pro } from "next/font/google";
 import { SafeArea } from "./components/SafeArea";
 import { farcasterConfig } from "../farcaster.config";
 import { Providers } from "./providers";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -46,6 +47,7 @@ export default function RootLayout({
       <html lang="en">
         <body className={`${inter.variable} ${sourceCodePro.variable}`}>
           <SafeArea>{children}</SafeArea>
+          <Analytics />
         </body>
       </html>
     </Providers>
