@@ -5,8 +5,11 @@
 
 export const DECAY_PER_HOUR = { food: 10, clean: 8, energy: 6 } as const;
 export const ACTION_GAIN = 30;
-export const ACTION_XP = 10;
+export const ACTION_XP_ONCHAIN = 10; // action confirmed by a Base transaction
+export const ACTION_XP_OFFCHAIN = 5; // fallback without a transaction
+export const GM_XP = 15;
 export const DAILY_XP_CAP = 150;
+export const MAX_STREAK_BOOST = 15; // percent
 
 // Short cooldowns for testing. Raise before launch.
 export const COOLDOWN_MS = {
@@ -32,21 +35,34 @@ export interface GameState {
   dayKey: string;
   cooldowns: Record<ActionKey, number>;
   lastUpdate: number;
+  streak: number; // consecutive GM days
+  lastGm: string; // "YYYY-MM-DD" of the last GM, "" if never
 }
 
 /* ------------------------------ helpers ---------------------------- */
 
 export const clamp = (v: number) => Math.min(100, Math.max(0, v));
-export const todayKey = () => new Date().toISOString().slice(0, 10);
+export const dayOf = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+export const todayKey = () => dayOf(Date.now());
+
+export function streakBoostPct(streak: number): number {
+  return Math.min(MAX_STREAK_BOOST, Math.max(0, streak) * 3);
+}
+
+function boostedXp(baseXp: number, streak: number): number {
+  return Math.round(baseXp * (1 + streakBoostPct(streak) / 100));
+}
 
 export function freshState(now: number): GameState {
   return {
     stats: { food: 80, clean: 80, energy: 80 },
     xp: 0,
     xpToday: 0,
-    dayKey: todayKey(),
+    dayKey: dayOf(now),
     cooldowns: { feed: 0, wash: 0, swim: 0 },
     lastUpdate: now,
+    streak: 0,
+    lastGm: "",
   };
 }
 
@@ -75,12 +91,14 @@ export function sanitize(data: unknown, now: number): GameState {
       swim: num(cds.swim, 0),
     },
     lastUpdate: num(d.lastUpdate, now),
+    streak: Math.max(0, Math.floor(num(d.streak, 0))),
+    lastGm: typeof d.lastGm === "string" ? d.lastGm : "",
   };
 }
 
 export function withDecay(state: GameState, now: number): GameState {
   const hours = Math.max(0, (now - state.lastUpdate) / 3_600_000);
-  const day = todayKey();
+  const day = dayOf(now);
   return {
     ...state,
     stats: {
@@ -94,18 +112,23 @@ export function withDecay(state: GameState, now: number): GameState {
   };
 }
 
-/** Server-side action application. Returns ok=false if the action is
- *  still on cooldown. */
+/** Server-side action application. Onchain actions earn full XP,
+ *  offchain fallback earns half. Streak adds up to +15%. */
 export function applyAction(
   state: GameState,
   key: ActionKey,
   now: number,
+  onchain: boolean,
 ): { ok: boolean; state: GameState } {
   const s = withDecay(state, now);
   if (s.cooldowns[key] > now) {
     return { ok: false, state: s };
   }
-  const gainXp = Math.min(ACTION_XP, Math.max(0, DAILY_XP_CAP - s.xpToday));
+  const baseXp = onchain ? ACTION_XP_ONCHAIN : ACTION_XP_OFFCHAIN;
+  const gainXp = Math.min(
+    boostedXp(baseXp, s.streak),
+    Math.max(0, DAILY_XP_CAP - s.xpToday),
+  );
   const stats = { ...s.stats };
   if (key === "feed") stats.food = clamp(stats.food + ACTION_GAIN);
   if (key === "wash") stats.clean = clamp(stats.clean + ACTION_GAIN);
@@ -118,6 +141,35 @@ export function applyAction(
       xp: s.xp + gainXp,
       xpToday: s.xpToday + gainXp,
       cooldowns: { ...s.cooldowns, [key]: now + COOLDOWN_MS[key] },
+    },
+  };
+}
+
+/** Daily GM: once per UTC day, keeps the streak alive.
+ *  Yesterday's GM continues the streak, a missed day resets it to 1. */
+export function applyGm(
+  state: GameState,
+  now: number,
+): { ok: boolean; state: GameState } {
+  const s = withDecay(state, now);
+  const today = dayOf(now);
+  if (s.lastGm === today) {
+    return { ok: false, state: s };
+  }
+  const yesterday = dayOf(now - 86_400_000);
+  const streak = s.lastGm === yesterday ? s.streak + 1 : 1;
+  const gainXp = Math.min(
+    boostedXp(GM_XP, streak),
+    Math.max(0, DAILY_XP_CAP - s.xpToday),
+  );
+  return {
+    ok: true,
+    state: {
+      ...s,
+      streak,
+      lastGm: today,
+      xp: s.xp + gainXp,
+      xpToday: s.xpToday + gainXp,
     },
   };
 }

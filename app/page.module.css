@@ -387,3 +387,354 @@
     animation: none;
   }
 }
+
+/* --------------------------- header extras -------------------------- */
+
+.headerRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.chipRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.streakChip {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 197, 61, 0.35);
+  background: rgba(255, 197, 61, 0.1);
+  color: #ffd97a;
+  white-space: nowrap;
+}
+
+.iconButton {
+  border: none;
+  background: rgba(242, 248, 255, 0.08);
+  border-radius: 999px;
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--foam);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ------------------------------ gm button --------------------------- */
+
+.gmButton {
+  border: none;
+  border-radius: 16px;
+  padding: 14px;
+  background: linear-gradient(90deg, #ffc53d, #ff9d3d);
+  color: #35270a;
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gmButton:active {
+  transform: scale(0.97);
+}
+
+.gmButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ------------------------------- scenes ----------------------------- */
+
+.scene {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  animation: sceneIn 0.35s ease;
+  overflow: hidden;
+}
+
+@keyframes sceneIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.scene_feed {
+  background:
+    radial-gradient(80% 50% at 50% 10%, rgba(255, 197, 61, 0.28) 0%, rgba(255, 197, 61, 0) 60%),
+    linear-gradient(180deg, #4a2f14 0%, #241505 80%);
+}
+
+.scene_wash {
+  background:
+    radial-gradient(80% 50% at 50% 0%, rgba(76, 201, 240, 0.35) 0%, rgba(76, 201, 240, 0) 60%),
+    linear-gradient(180deg, #0e4a5e 0%, #072433 80%);
+}
+
+.scene_swim {
+  background:
+    radial-gradient(90% 60% at 50% 100%, rgba(0, 82, 255, 0.45) 0%, rgba(0, 82, 255, 0) 70%),
+    linear-gradient(180deg, #0b3b75 0%, #041226 85%);
+}
+
+.sceneTurtle {
+  font-size: 96px;
+  line-height: 1;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5));
+  animation: munch 0.9s ease-in-out infinite;
+}
+
+@keyframes munch {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(-4deg);
+  }
+}
+
+.sceneProp {
+  font-size: 44px;
+  animation: bob 2.4s ease-in-out infinite;
+}
+
+.scenePlate {
+  font-size: 30px;
+  letter-spacing: 6px;
+}
+
+.sceneText {
+  font-size: 15px;
+  color: rgba(242, 248, 255, 0.75);
+}
+
+.showerHead {
+  font-size: 48px;
+}
+
+.drops {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.drop {
+  position: absolute;
+  top: -8%;
+  font-size: 20px;
+  opacity: 0.85;
+  animation: dropFall 1.3s linear infinite;
+}
+
+@keyframes dropFall {
+  from {
+    transform: translateY(0);
+    opacity: 0.9;
+  }
+  to {
+    transform: translateY(115vh);
+    opacity: 0.4;
+  }
+}
+
+.swimTurtle {
+  font-size: 96px;
+  line-height: 1;
+  animation: swimAway 4.2s ease-in forwards;
+}
+
+@keyframes swimAway {
+  0% {
+    transform: translate(-30vw, -6vh) scale(1);
+    opacity: 1;
+  }
+  60% {
+    transform: translate(10vw, 6vh) scale(0.7);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(38vw, 14vh) scale(0.3);
+    opacity: 0;
+  }
+}
+
+.waves {
+  font-size: 40px;
+  letter-spacing: -6px;
+  animation: waveRoll 2.4s ease-in-out infinite;
+}
+
+@keyframes waveRoll {
+  0%,
+  100% {
+    transform: translateX(-8px);
+  }
+  50% {
+    transform: translateX(8px);
+  }
+}
+
+/* ------------------------------ level up ---------------------------- */
+
+.turtleGrow {
+  animation: growUp 1.6s ease !important;
+}
+
+@keyframes growUp {
+  0% {
+    transform: scale(0.7);
+  }
+  45% {
+    transform: scale(1.35);
+  }
+  70% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.levelUp {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(4, 14, 30, 0.82);
+  animation: sceneIn 0.3s ease;
+}
+
+.levelUpBadge {
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #ffd97a;
+  text-shadow: 0 0 24px rgba(255, 197, 61, 0.6);
+  animation: growUp 1.2s ease;
+}
+
+.levelUpSpark {
+  font-size: 56px;
+  animation: growUp 1.6s ease;
+}
+
+/* ----------------------------- leaderboard --------------------------- */
+
+.lbOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(3, 10, 22, 0.72);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: sceneIn 0.25s ease;
+}
+
+.lbPanel {
+  width: 100%;
+  max-width: 460px;
+  max-height: 72vh;
+  overflow-y: auto;
+  background: #0a2242;
+  border-radius: 24px 24px 0 0;
+  padding: 18px 18px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lbHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.lbList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lbRow {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(242, 248, 255, 0.05);
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 12px;
+}
+
+.lbMe {
+  background: rgba(0, 82, 255, 0.35);
+  border: 1px solid rgba(76, 201, 240, 0.5);
+}
+
+.lbRank {
+  color: #ffd97a;
+  font-weight: 700;
+}
+
+.lbAddr {
+  color: var(--foam);
+}
+
+.lbXp {
+  color: var(--foam-dim);
+  white-space: nowrap;
+}
+
+.lbYou {
+  text-align: center;
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 12px;
+  color: var(--foam-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sceneTurtle,
+  .sceneProp,
+  .drop,
+  .swimTurtle,
+  .waves,
+  .turtleGrow,
+  .levelUpBadge,
+  .levelUpSpark {
+    animation: none;
+  }
+}

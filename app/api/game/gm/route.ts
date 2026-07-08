@@ -1,40 +1,32 @@
 import { getRedis } from "@/lib/redis";
 import { getSessionAddress } from "@/lib/session";
-import { ACTION_KEYS, type ActionKey, applyAction, sanitize } from "@/lib/game";
+import { applyGm, sanitize } from "@/lib/game";
 import { verifyActionTx } from "@/lib/verifyTx";
 
 export const maxDuration = 30;
 
-/* Game action. With a verified Base transaction: full XP.
-   Without one (fallback): half XP. */
+/* Daily GM check-in: requires a real Base transaction. */
 export async function POST(req: Request) {
   const address = await getSessionAddress();
   if (!address) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  let action: unknown;
   let hash: unknown;
   try {
-    const body = (await req.json()) as { action?: unknown; hash?: unknown };
-    action = body.action;
-    hash = body.hash;
+    hash = ((await req.json()) as { hash?: unknown }).hash;
   } catch {
     return Response.json({ error: "bad request" }, { status: 400 });
   }
-  if (typeof action !== "string" || !ACTION_KEYS.includes(action as ActionKey)) {
-    return Response.json({ error: "unknown action" }, { status: 400 });
+  if (typeof hash !== "string" || !(await verifyActionTx(hash, address, "gm"))) {
+    return Response.json({ error: "tx not verified" }, { status: 400 });
   }
-
-  const onchain =
-    typeof hash === "string" &&
-    (await verifyActionTx(hash, address, action));
 
   const now = Date.now();
   const redis = getRedis();
   const key = `turtle:${address}`;
   const raw = await redis.get(key);
-  const result = applyAction(sanitize(raw, now), action as ActionKey, now, onchain);
+  const result = applyGm(sanitize(raw, now), now);
 
   await redis.set(key, result.state);
   if (result.ok) {
@@ -42,7 +34,7 @@ export async function POST(req: Request) {
   }
 
   return Response.json(
-    { ok: result.ok, state: result.state, now, onchain },
+    { ok: result.ok, state: result.state, now },
     { status: result.ok ? 200 : 429 },
   );
 }
