@@ -738,3 +738,45 @@
     animation: none;
   }
 }
+
+/* ----------------------------- 3D turtle ---------------------------- */
+
+.turtle3dWrap {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: block;
+}
+
+.turtle3dLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 84px;
+  animation: bob 3.4s ease-in-out infinite;
+}
+
+/* ---------------------------- mini-game ----------------------------- */
+
+.miniGameButton {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid rgba(62, 213, 152, 0.4);
+  border-radius: 14px;
+  background: rgba(62, 213, 152, 0.1);
+  color: var(--foam);
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.miniGameButton:active {
+  transform: scale(0.98);
+  background: rgba(62, 213, 152, 0.18);
+}

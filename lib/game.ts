@@ -37,6 +37,7 @@ export interface GameState {
   lastUpdate: number;
   streak: number; // consecutive GM days
   lastGm: string; // "YYYY-MM-DD" of the last GM, "" if never
+  minigameXpToday?: number; // mini-game XP granted today (anti-farm cap)
 }
 
 /* ------------------------------ helpers ---------------------------- */
@@ -93,6 +94,7 @@ export function sanitize(data: unknown, now: number): GameState {
     lastUpdate: num(d.lastUpdate, now),
     streak: Math.max(0, Math.floor(num(d.streak, 0))),
     lastGm: typeof d.lastGm === "string" ? d.lastGm : "",
+    minigameXpToday: Math.max(0, Math.floor(num(d.minigameXpToday, 0))),
   };
 }
 
@@ -107,6 +109,8 @@ export function withDecay(state: GameState, now: number): GameState {
       energy: clamp(state.stats.energy - DECAY_PER_HOUR.energy * hours),
     },
     xpToday: day === state.dayKey ? state.xpToday : 0,
+    minigameXpToday:
+      day === state.dayKey ? state.minigameXpToday ?? 0 : 0,
     dayKey: day,
     lastUpdate: now,
   };
@@ -175,6 +179,36 @@ export function applyGm(
 }
 
 /* --------------------------- display helpers ----------------------- */
+
+/** Mini-game reward: score converts to XP and a food top-up, capped
+ *  per day so it can't be farmed. Server-authoritative. */
+export const MINIGAME_XP_PER_100 = 5;
+export const MINIGAME_DAILY_XP_CAP = 60;
+
+export function applyMinigame(
+  state: GameState,
+  score: number,
+  now: number,
+): { ok: boolean; state: GameState; earned: number } {
+  const s = withDecay(state, now);
+  const safeScore = Math.max(0, Math.min(100_000, Math.floor(score)));
+  const raw = Math.floor((safeScore / 100) * MINIGAME_XP_PER_100);
+  // withDecay already reset minigameXpToday if the day rolled over.
+  const usedToday = s.minigameXpToday ?? 0;
+  const room = Math.max(0, MINIGAME_DAILY_XP_CAP - usedToday);
+  const earned = Math.min(raw, room, Math.max(0, DAILY_XP_CAP - s.xpToday));
+  return {
+    ok: earned > 0,
+    earned,
+    state: {
+      ...s,
+      xp: s.xp + earned,
+      xpToday: s.xpToday + earned,
+      minigameXpToday: usedToday + earned,
+      stats: { ...s.stats, food: clamp(s.stats.food + Math.min(20, safeScore / 50)) },
+    },
+  };
+}
 
 export function levelInfo(xp: number) {
   let level = 1;

@@ -18,7 +18,19 @@ import {
 } from "@/lib/game";
 import { detectBaseApp } from "@/lib/baseApp";
 import * as sound from "@/lib/sound";
+import dynamic from "next/dynamic";
 import styles from "./page.module.css";
+
+// three.js is heavy: load it only on the client, after first paint,
+// so the gate and connect screens stay instant.
+const Turtle3D = dynamic(() => import("./components/Turtle3D"), {
+  ssr: false,
+  loading: () => <span className={styles.turtle3dLoading}>🐢</span>,
+});
+
+const TurtleJump = dynamic(() => import("./components/TurtleJump"), {
+  ssr: false,
+});
 
 const ACTIONS: { key: ActionKey; label: string; emoji: string }[] = [
   { key: "feed", label: "Feed", emoji: "🍎" },
@@ -291,6 +303,32 @@ export default function Home() {
     }
   }, []);
 
+  /* ---------------------------- mini-game ---------------------------- */
+  const [jumpOpen, setJumpOpen] = useState(false);
+
+  const submitMinigame = useCallback(
+    async (finalScore: number): Promise<number | null> => {
+      try {
+        const res = await fetch("/api/game/minigame", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ score: finalScore }),
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as {
+          earned: number;
+          state: GameState;
+          now: number;
+        };
+        acceptState({ state: data.state, now: data.now });
+        return data.earned;
+      } catch {
+        return null;
+      }
+    },
+    [acceptState],
+  );
+
   /* --------------------------- 1s ui clock --------------------------- */
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -396,7 +434,6 @@ export default function Home() {
   /* ------------------------------- game ------------------------------ */
 
   const { level, into, next } = levelInfo(state.xp);
-  const turtleSize = Math.min(72 + level * 6, 168);
   const serverNow = Date.now() + serverDelta.current;
   const gmDone = state.lastGm === todayKey();
   const boost = streakBoostPct(state.streak);
@@ -446,18 +483,13 @@ export default function Home() {
       <section className={styles.lagoon}>
         <button
           type="button"
-          className={styles.turtleButton}
+          className={`${styles.turtleButton} ${styles.turtle3dWrap} ${
+            bounce ? styles.turtleBounce : ""
+          } ${levelUpTo ? styles.turtleGrow : ""}`}
           onClick={wobble}
           aria-label="Pet the turtle"
         >
-          <span
-            className={`${styles.turtle} ${bounce ? styles.turtleBounce : ""} ${
-              levelUpTo ? styles.turtleGrow : ""
-            }`}
-            style={{ fontSize: turtleSize }}
-          >
-            🐢
-          </span>
+          <Turtle3D level={level} />
         </button>
       </section>
       <p className={styles.mood}>{moodLine(state.stats)}</p>
@@ -510,6 +542,17 @@ export default function Home() {
           );
         })}
       </section>
+
+      <button
+        type="button"
+        className={styles.miniGameButton}
+        onClick={() => {
+          sound.playPop();
+          setJumpOpen(true);
+        }}
+      >
+        🪷 Play Turtle Jump · earn XP
+      </button>
 
       {note && <p className={styles.error}>{note}</p>}
 
@@ -624,6 +667,12 @@ export default function Home() {
             )}
           </div>
         </div>
+      )}
+      {jumpOpen && (
+        <TurtleJump
+          onClose={() => setJumpOpen(false)}
+          onScore={submitMinigame}
+        />
       )}
     </main>
   );
