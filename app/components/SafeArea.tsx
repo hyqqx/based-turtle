@@ -1,31 +1,21 @@
-'use client'
-
-import { useMiniApp } from '@/app/providers/MiniAppProvider';
-import { ReactNode } from 'react';
+import { ReactNode } from "react";
 
 interface SafeAreaProps {
   children: ReactNode;
   className?: string;
 }
 
+/* Plain CSS safe-area padding: works in any browser and in the
+   Base App in-app browser, no SDK required. */
 export function SafeArea({ children, className }: SafeAreaProps) {
-  const { context, isReady } = useMiniApp();
-
-  // Only apply insets when running inside a mini app
-  if (!isReady || !context) {
-    return <div className={className}>{children}</div>;
-  }
-
-  const insets = context.client?.safeAreaInsets;
-
   return (
     <div
       className={className}
       style={{
-        paddingTop: insets?.top ?? 0,
-        paddingBottom: insets?.bottom ?? 0,
-        paddingLeft: insets?.left ?? 0,
-        paddingRight: insets?.right ?? 0,
+        paddingTop: "env(safe-area-inset-top)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+        paddingLeft: "env(safe-area-inset-left)",
+        paddingRight: "env(safe-area-inset-right)",
       }}
     >
       {children}

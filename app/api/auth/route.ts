@@ -1,82 +1,53 @@
-import { Errors, createClient } from "@farcaster/quick-auth";
-import { NextRequest, NextResponse } from "next/server";
+import { createPublicClient, http, getAddress } from "viem";
+import { base } from "viem/chains";
+import { parseSiweMessage } from "viem/siwe";
+import { getRedis } from "@/lib/redis";
+import { createSession } from "@/lib/session";
 
-const client = createClient();
+const client = createPublicClient({
+  chain: base,
+  transport: http(process.env.BASE_RPC_URL || "https://mainnet.base.org"),
+});
 
-// Helper function to determine the correct domain for JWT verification
-function getUrlHost(request: NextRequest): string {
-  // First try to get the origin from the Origin header (most reliable for CORS requests)
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try {
-      const url = new URL(origin);
-      return url.host;
-    } catch (error) {
-      console.warn("Invalid origin header:", origin, error);
-    }
-  }
-
-  // Fallback to Host header
-  const host = request.headers.get("host");
-  if (host) {
-    return host;
-  }
-
-  // Final fallback to environment variables (your original logic)
-  let urlValue: string;
-  if (process.env.VERCEL_ENV === "production") {
-    urlValue = process.env.NEXT_PUBLIC_URL!;
-  } else if (process.env.VERCEL_URL) {
-    urlValue = `https://${process.env.VERCEL_URL}`;
-  } else {
-    urlValue = "http://localhost:3000";
-  }
-
-  const url = new URL(urlValue);
-  return url.host;
-}
-
-export async function GET(request: NextRequest) {
-  // Because we're fetching this endpoint via `sdk.quickAuth.fetch`,
-  // if we're in a mini app, the request will include the necessary `Authorization` header.
-  const authorization = request.headers.get("Authorization");
-
-  // Here we ensure that we have a valid token.
-  if (!authorization || !authorization.startsWith("Bearer ")) {
-    return NextResponse.json({ message: "Missing token" }, { status: 401 });
-  }
-
+/* Sign-In with Ethereum. Verifies the signature (including Base Account
+   smart wallets via ERC-6492) and issues an httpOnly session cookie. */
+export async function POST(req: Request) {
   try {
-    // Now we verify the token. `domain` must match the domain of the request.
-    // In our case, we're using the `getUrlHost` function to get the domain of the request
-    // based on the Vercel environment. This will vary depending on your hosting provider.
-    const payload = await client.verifyJwt({
-      token: authorization.split(" ")[1] as string,
-      domain: getUrlHost(request),
-    });
-
-    console.log("payload", payload);
-
-    // If the token was valid, `payload.sub` will be the user's Farcaster ID.
-    const userFid = payload.sub;
-
-    // Return user information for your waitlist application
-    return NextResponse.json({
-      success: true,
-      user: {
-        fid: userFid,
-        issuedAt: payload.iat,
-        expiresAt: payload.exp,
-      },
-    });
-
-  } catch (e) {
-    if (e instanceof Errors.InvalidTokenError) {
-      return NextResponse.json({ message: "Invalid token" }, { status: 401 });
+    const body = (await req.json()) as { message?: string; signature?: string };
+    const { message, signature } = body;
+    if (typeof message !== "string" || typeof signature !== "string") {
+      return Response.json({ error: "bad request" }, { status: 400 });
     }
-    if (e instanceof Error) {
-      return NextResponse.json({ message: e.message }, { status: 500 });
+
+    const parsed = parseSiweMessage(message);
+    if (!parsed.address || !parsed.nonce || !parsed.domain) {
+      return Response.json({ error: "bad message" }, { status: 400 });
     }
-    throw e;
+
+    // The signed domain must match the host serving this API.
+    const host = req.headers.get("host") ?? "";
+    if (parsed.domain !== host) {
+      return Response.json({ error: "domain mismatch" }, { status: 400 });
+    }
+
+    // Nonce is single-use: read and delete atomically.
+    const nonceOk = await getRedis().getdel(`nonce:${parsed.nonce}`);
+    if (!nonceOk) {
+      return Response.json({ error: "bad nonce" }, { status: 400 });
+    }
+
+    const valid = await client.verifySiweMessage({
+      message,
+      signature: signature as `0x${string}`,
+    });
+    if (!valid) {
+      return Response.json({ error: "invalid signature" }, { status: 401 });
+    }
+
+    const address = getAddress(parsed.address);
+    await createSession(address);
+    return Response.json({ ok: true, address });
+  } catch {
+    return Response.json({ error: "auth failed" }, { status: 500 });
   }
 }

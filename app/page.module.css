@@ -304,3 +304,86 @@
     animation: none;
   }
 }
+
+/* --------------------- gate / connect / sign-in --------------------- */
+
+.centerCard {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  max-width: 320px;
+}
+
+.bigTurtle {
+  font-size: 84px;
+  line-height: 1;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.45));
+  animation: bob 3.4s ease-in-out infinite;
+}
+
+.centerText {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--foam-dim);
+}
+
+.domain {
+  font-family: var(--font-source-code-pro), monospace;
+  color: var(--foam);
+}
+
+.bigButton {
+  width: 100%;
+  padding: 16px;
+  border: none;
+  border-radius: 16px;
+  background: var(--base-blue);
+  color: var(--foam);
+  font-family: var(--font-source-code-pro), monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bigButton:active {
+  transform: scale(0.97);
+}
+
+.bigButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+
+.bigButton:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: 2px;
+}
+
+.ghostLink {
+  border: none;
+  background: none;
+  color: rgba(242, 248, 255, 0.35);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 6px;
+}
+
+.error {
+  text-align: center;
+  font-size: 13px;
+  color: #ff9d9d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bigTurtle {
+    animation: none;
+  }
+}

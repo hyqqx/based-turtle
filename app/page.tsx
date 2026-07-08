@@ -1,147 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMiniApp } from "./providers/MiniAppProvider";
+import { useAccount, useConnect, useSignMessage } from "wagmi";
+import { base } from "wagmi/chains";
+import { createSiweMessage } from "viem/siwe";
+import {
+  type ActionKey,
+  type GameState,
+  DAILY_XP_CAP,
+  formatCooldown,
+  levelInfo,
+  moodLine,
+  stageName,
+} from "@/lib/game";
+import { detectBaseApp } from "@/lib/baseApp";
 import styles from "./page.module.css";
-
-/* ------------------------------------------------------------------ */
-/*  Game constants. Tune freely: times are in milliseconds.            */
-/*  NOTE: this is the visual v1. Real game logic moves server-side     */
-/*  later so progress can't be cheated.                                */
-/* ------------------------------------------------------------------ */
-
-const DECAY_PER_HOUR = { food: 10, clean: 8, energy: 6 } as const;
-const ACTION_GAIN = 30;
-const ACTION_XP = 10;
-const DAILY_XP_CAP = 150;
-
-// Short cooldowns for testing. Raise before launch.
-const COOLDOWN_MS = {
-  feed: 60_000, // 1 min
-  wash: 90_000, // 1.5 min
-  swim: 120_000, // 2 min
-} as const;
-
-const STORAGE_KEY = "based-turtle-save-v1";
-
-type ActionKey = keyof typeof COOLDOWN_MS;
-
-interface Stats {
-  food: number;
-  clean: number;
-  energy: number;
-}
-
-interface SaveState {
-  stats: Stats;
-  xp: number;
-  xpToday: number;
-  dayKey: string;
-  cooldowns: Record<ActionKey, number>;
-  lastUpdate: number;
-}
-
-/* ------------------------------ helpers ---------------------------- */
-
-const clamp = (v: number) => Math.min(100, Math.max(0, v));
-const todayKey = () => new Date().toISOString().slice(0, 10);
-
-function freshState(): SaveState {
-  return {
-    stats: { food: 80, clean: 80, energy: 80 },
-    xp: 0,
-    xpToday: 0,
-    dayKey: todayKey(),
-    cooldowns: { feed: 0, wash: 0, swim: 0 },
-    lastUpdate: Date.now(),
-  };
-}
-
-/** Rebuild a valid state from whatever is in storage, so a broken
- *  or outdated save never crashes the game. */
-function parseSave(raw: string | null): SaveState {
-  const fresh = freshState();
-  if (!raw) return fresh;
-  try {
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    const num = (v: unknown, fallback: number) =>
-      typeof v === "number" && Number.isFinite(v) ? v : fallback;
-    const stats = (data.stats ?? {}) as Record<string, unknown>;
-    const cds = (data.cooldowns ?? {}) as Record<string, unknown>;
-    return {
-      stats: {
-        food: clamp(num(stats.food, fresh.stats.food)),
-        clean: clamp(num(stats.clean, fresh.stats.clean)),
-        energy: clamp(num(stats.energy, fresh.stats.energy)),
-      },
-      xp: Math.max(0, num(data.xp, 0)),
-      xpToday: Math.max(0, num(data.xpToday, 0)),
-      dayKey: typeof data.dayKey === "string" ? data.dayKey : fresh.dayKey,
-      cooldowns: {
-        feed: num(cds.feed, 0),
-        wash: num(cds.wash, 0),
-        swim: num(cds.swim, 0),
-      },
-      lastUpdate: num(data.lastUpdate, Date.now()),
-    };
-  } catch {
-    return fresh;
-  }
-}
-
-function withDecay(state: SaveState, now: number): SaveState {
-  const hours = Math.max(0, (now - state.lastUpdate) / 3_600_000);
-  const day = todayKey();
-  return {
-    ...state,
-    stats: {
-      food: clamp(state.stats.food - DECAY_PER_HOUR.food * hours),
-      clean: clamp(state.stats.clean - DECAY_PER_HOUR.clean * hours),
-      energy: clamp(state.stats.energy - DECAY_PER_HOUR.energy * hours),
-    },
-    xpToday: day === state.dayKey ? state.xpToday : 0,
-    dayKey: day,
-    lastUpdate: now,
-  };
-}
-
-function levelInfo(xp: number) {
-  let level = 1;
-  let rest = xp;
-  let cost = 50;
-  while (rest >= cost) {
-    rest -= cost;
-    level += 1;
-    cost = 50 + (level - 1) * 25;
-  }
-  return { level, into: rest, next: cost };
-}
-
-function stageName(level: number): string {
-  if (level < 3) return "Baby";
-  if (level < 6) return "Young";
-  if (level < 10) return "Teen";
-  if (level < 15) return "Adult";
-  return "Giant";
-}
-
-function moodLine(stats: Stats): string {
-  const min = Math.min(stats.food, stats.clean, stats.energy);
-  if (min >= 70) return "Feeling based ✨";
-  if (min < 35 && stats.food === min) return "I'm hungry…";
-  if (min < 35 && stats.clean === min) return "I could use a bath 🫧";
-  if (min < 35 && stats.energy === min) return "Sleepy… the sea would help";
-  return "Doing okay 🌊";
-}
-
-function formatCooldown(ms: number): string {
-  const total = Math.ceil(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-/* ------------------------------ actions ---------------------------- */
 
 const ACTIONS: { key: ActionKey; label: string; emoji: string }[] = [
   { key: "feed", label: "Feed", emoji: "🍎" },
@@ -149,78 +22,163 @@ const ACTIONS: { key: ActionKey; label: string; emoji: string }[] = [
   { key: "swim", label: "Send to sea", emoji: "🌊" },
 ];
 
-/* ------------------------------ component -------------------------- */
+type Env = "checking" | "inside" | "outside";
 
 export default function Home() {
-  const { context } = useMiniApp();
-  const [state, setState] = useState<SaveState | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const [bounce, setBounce] = useState(false);
-  const bounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* ------------------------- environment gate ------------------------ */
+  const [env, setEnv] = useState<Env>("checking");
+  const [bypass, setBypass] = useState(false);
 
-  // Load the save and apply offline decay.
   useEffect(() => {
-    let raw: string | null = null;
-    try {
-      raw = window.localStorage.getItem(STORAGE_KEY);
-    } catch {
-      // Storage unavailable: start fresh.
-    }
-    setState(withDecay(parseSave(raw), Date.now()));
-  }, []);
-
-  // Persist every change.
-  useEffect(() => {
-    if (!state) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Storage unavailable: play without saving.
-    }
-  }, [state]);
-
-  // One-second clock: cooldown labels tick and stats decay live.
-  useEffect(() => {
+    // The injected provider can appear a moment after page load,
+    // so poll briefly before declaring "not the Base App".
+    let tries = 0;
     const timer = setInterval(() => {
-      const ts = Date.now();
-      setNow(ts);
-      setState((s) => (s ? withDecay(s, ts) : s));
-    }, 1000);
+      tries += 1;
+      if (detectBaseApp()) {
+        setEnv("inside");
+        clearInterval(timer);
+      } else if (tries >= 8) {
+        setEnv("outside");
+        clearInterval(timer);
+      }
+    }, 200);
     return () => clearInterval(timer);
   }, []);
 
+  /* ----------------------------- wallet ----------------------------- */
+  const { address, isConnected } = useAccount();
+  const { connect, connectors, isPending: connecting } = useConnect();
+  const { signMessageAsync } = useSignMessage();
+  const autoConnectTried = useRef(false);
+
+  const inApp = env === "inside" || bypass;
+
+  useEffect(() => {
+    if (!inApp || isConnected || autoConnectTried.current) return;
+    if (connectors.length === 0) return;
+    autoConnectTried.current = true;
+    connect({ connector: connectors[0] });
+  }, [inApp, isConnected, connectors, connect]);
+
+  /* ------------------------- session + state ------------------------ */
+  const [state, setState] = useState<GameState | null>(null);
+  const [needSignIn, setNeedSignIn] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const [pendingAction, setPendingAction] = useState<ActionKey | null>(null);
+  const [errMsg, setErrMsg] = useState("");
+  const serverDelta = useRef(0);
+
+  const fetchState = useCallback(async () => {
+    try {
+      const res = await fetch("/api/game/state", { cache: "no-store" });
+      if (res.status === 401) {
+        setNeedSignIn(true);
+        setState(null);
+        return;
+      }
+      if (!res.ok) throw new Error("state failed");
+      const data = (await res.json()) as { state: GameState; now: number };
+      serverDelta.current = data.now - Date.now();
+      setState(data.state);
+      setNeedSignIn(false);
+      setErrMsg("");
+    } catch {
+      setErrMsg("Connection hiccup. Retrying…");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (inApp && isConnected) fetchState();
+  }, [inApp, isConnected, fetchState]);
+
+  // Refresh from the server once a minute while playing.
+  useEffect(() => {
+    if (!state) return;
+    const timer = setInterval(fetchState, 60_000);
+    return () => clearInterval(timer);
+  }, [state, fetchState]);
+
+  const signIn = useCallback(async () => {
+    if (!address) return;
+    setSigningIn(true);
+    setErrMsg("");
+    try {
+      const nonceRes = await fetch("/api/auth/nonce", { cache: "no-store" });
+      const { nonce } = (await nonceRes.json()) as { nonce: string };
+      const message = createSiweMessage({
+        address,
+        chainId: base.id,
+        domain: window.location.host,
+        nonce,
+        uri: window.location.origin,
+        version: "1",
+        statement: "Sign in to Based Turtle",
+      });
+      const signature = await signMessageAsync({ message });
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, signature }),
+      });
+      if (!res.ok) throw new Error("verify failed");
+      await fetchState();
+    } catch {
+      setErrMsg("Sign-in didn't go through. Try again.");
+    } finally {
+      setSigningIn(false);
+    }
+  }, [address, signMessageAsync, fetchState]);
+
+  const doAction = useCallback(
+    async (key: ActionKey) => {
+      if (pendingAction) return;
+      setPendingAction(key);
+      try {
+        const res = await fetch("/api/game/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: key }),
+        });
+        if (res.status === 401) {
+          setNeedSignIn(true);
+          setState(null);
+          return;
+        }
+        const data = (await res.json()) as { state: GameState; now: number };
+        serverDelta.current = data.now - Date.now();
+        setState(data.state);
+      } catch {
+        setErrMsg("Action didn't reach the server. Try again.");
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [pendingAction],
+  );
+
+  /* --------------------------- 1s ui clock --------------------------- */
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const [bounce, setBounce] = useState(false);
+  const bounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wobble = useCallback(() => {
     setBounce(true);
     if (bounceTimer.current) clearTimeout(bounceTimer.current);
     bounceTimer.current = setTimeout(() => setBounce(false), 600);
   }, []);
 
-  const doAction = useCallback(
-    (key: ActionKey) => {
-      const ts = Date.now();
-      setState((prev) => {
-        if (!prev) return prev;
-        const s = withDecay(prev, ts);
-        if (s.cooldowns[key] > ts) return s;
-        const gainXp = Math.min(ACTION_XP, Math.max(0, DAILY_XP_CAP - s.xpToday));
-        const stats = { ...s.stats };
-        if (key === "feed") stats.food = clamp(stats.food + ACTION_GAIN);
-        if (key === "wash") stats.clean = clamp(stats.clean + ACTION_GAIN);
-        if (key === "swim") stats.energy = clamp(stats.energy + ACTION_GAIN);
-        return {
-          ...s,
-          stats,
-          xp: s.xp + gainXp,
-          xpToday: s.xpToday + gainXp,
-          cooldowns: { ...s.cooldowns, [key]: ts + COOLDOWN_MS[key] },
-        };
-      });
-      wobble();
-    },
-    [wobble],
-  );
+  const copyLink = useCallback(() => {
+    navigator.clipboard?.writeText("https://basedturtle.com").catch(() => {});
+  }, []);
 
-  if (!state) {
+  /* ------------------------------ screens ---------------------------- */
+
+  if (env === "checking") {
     return (
       <main className={styles.page}>
         <div className={styles.loading}>🐢</div>
@@ -228,9 +186,93 @@ export default function Home() {
     );
   }
 
+  if (!inApp) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.centerCard}>
+          <span className={styles.bigTurtle}>🐢</span>
+          <h1 className={styles.wordmark}>BASED TURTLE</h1>
+          <p className={styles.centerText}>
+            This game lives inside the Base App. Open{" "}
+            <span className={styles.domain}>basedturtle.com</span> there to
+            play.
+          </p>
+          <button type="button" className={styles.bigButton} onClick={copyLink}>
+            Copy link
+          </button>
+          <button
+            type="button"
+            className={styles.ghostLink}
+            onClick={() => setBypass(true)}
+          >
+            continue in browser (test mode)
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isConnected) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.centerCard}>
+          <span className={styles.bigTurtle}>🐢</span>
+          <h1 className={styles.wordmark}>BASED TURTLE</h1>
+          <p className={styles.centerText}>
+            Connect your wallet to meet your turtle.
+          </p>
+          <button
+            type="button"
+            className={styles.bigButton}
+            disabled={connecting || connectors.length === 0}
+            onClick={() => connect({ connector: connectors[0] })}
+          >
+            {connecting ? "Connecting…" : "Connect wallet"}
+          </button>
+          {errMsg && <p className={styles.error}>{errMsg}</p>}
+        </div>
+      </main>
+    );
+  }
+
+  if (needSignIn || !state) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.centerCard}>
+          <span className={styles.bigTurtle}>🐢</span>
+          <h1 className={styles.wordmark}>BASED TURTLE</h1>
+          {needSignIn ? (
+            <>
+              <p className={styles.centerText}>
+                One signature and your turtle is saved to your wallet, on any
+                device.
+              </p>
+              <button
+                type="button"
+                className={styles.bigButton}
+                disabled={signingIn}
+                onClick={signIn}
+              >
+                {signingIn ? "Check your wallet…" : "Sign in to play"}
+              </button>
+            </>
+          ) : (
+            <p className={styles.centerText}>Waking the turtle…</p>
+          )}
+          {errMsg && <p className={styles.error}>{errMsg}</p>}
+        </div>
+      </main>
+    );
+  }
+
+  /* ------------------------------- game ------------------------------ */
+
   const { level, into, next } = levelInfo(state.xp);
   const turtleSize = Math.min(72 + level * 6, 168);
-  const userName = context?.user?.displayName;
+  const shortAddr = address
+    ? `${address.slice(0, 6)}…${address.slice(-4)}`
+    : "";
+  const serverNow = Date.now() + serverDelta.current;
 
   const bars: { label: string; value: number; barClass: string }[] = [
     { label: "FOOD", value: state.stats.food, barClass: styles.barFood },
@@ -243,7 +285,7 @@ export default function Home() {
       <header className={styles.header}>
         <div>
           <h1 className={styles.wordmark}>BASED TURTLE</h1>
-          <p className={styles.greeting}>gm{userName ? `, ${userName}` : ""}</p>
+          <p className={styles.greeting}>gm · {shortAddr}</p>
         </div>
         <div className={styles.levelChip}>
           LVL {level} · {stageName(level)}
@@ -285,24 +327,30 @@ export default function Home() {
       <section className={styles.actions}>
         {ACTIONS.map((action) => {
           const readyAt = state.cooldowns[action.key];
-          const waitMs = readyAt - now;
+          const waitMs = readyAt - serverNow;
           const onCooldown = waitMs > 0;
+          const busy = pendingAction === action.key;
           return (
             <button
               key={action.key}
               type="button"
               className={styles.actionButton}
-              disabled={onCooldown}
-              onClick={() => doAction(action.key)}
+              disabled={onCooldown || pendingAction !== null}
+              onClick={() => {
+                wobble();
+                doAction(action.key);
+              }}
             >
               <span className={styles.actionEmoji}>{action.emoji}</span>
               <span className={styles.actionLabel}>
-                {onCooldown ? formatCooldown(waitMs) : action.label}
+                {busy ? "…" : onCooldown ? formatCooldown(waitMs) : action.label}
               </span>
             </button>
           );
         })}
       </section>
+
+      {errMsg && <p className={styles.error}>{errMsg}</p>}
 
       <footer className={styles.footer}>
         <div className={styles.xpRow}>
