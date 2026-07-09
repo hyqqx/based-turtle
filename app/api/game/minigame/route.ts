@@ -2,9 +2,8 @@ import { getRedis } from "@/lib/redis";
 import { getSessionAddress } from "@/lib/session";
 import { applyMinigame, sanitize } from "@/lib/game";
 
-/* Reward for a mini-game run. The score is validated and the reward is
-   capped per day server-side, so a forged score can't mint unlimited XP.
-   A soft per-minute rate limit blocks scripted spamming. */
+/* Reward for a mini-game run. Score is clamped and the reward is capped
+   per day server-side, so a forged score can't mint unlimited XP. */
 export async function POST(req: Request) {
   const address = await getSessionAddress();
   if (!address) {
@@ -23,7 +22,6 @@ export async function POST(req: Request) {
 
   const redis = getRedis();
 
-  // Rate limit: at most 10 submissions per minute per address.
   const rlKey = `mg:rl:${address}`;
   const hits = await redis.incr(rlKey);
   if (hits === 1) await redis.expire(rlKey, 60);
@@ -41,5 +39,11 @@ export async function POST(req: Request) {
     await redis.zadd("lb:xp", { score: result.state.xp, member: address });
   }
 
-  return Response.json({ ok: result.ok, earned: result.earned, state: result.state, now });
+  return Response.json({
+    ok: result.ok,
+    earned: result.earned,
+    coins: result.coins,
+    state: result.state,
+    now,
+  });
 }

@@ -1,28 +1,40 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAccount, useConnect, useSendTransaction, useSignMessage } from "wagmi";
+import {
+  useAccount,
+  useBalance,
+  useConnect,
+  useSendCalls,
+  useSendTransaction,
+  useSignMessage,
+} from "wagmi";
+import { waitForCallsStatus } from "@wagmi/core";
 import { base } from "wagmi/chains";
 import { createSiweMessage } from "viem/siwe";
 import { stringToHex } from "viem";
+import dynamic from "next/dynamic";
 import {
   type ActionKey,
   type GameState,
+  BACKGROUNDS,
   DAILY_XP_CAP,
   formatCooldown,
   levelInfo,
+  moodFace,
+  moodKey,
   moodLine,
   stageName,
   streakBoostPct,
   todayKey,
 } from "@/lib/game";
+import { DATA_SUFFIX, PAYMASTER_URL } from "@/lib/onchain";
 import { detectBaseApp } from "@/lib/baseApp";
+import { config } from "@/lib/wagmi";
 import * as sound from "@/lib/sound";
-import dynamic from "next/dynamic";
 import styles from "./page.module.css";
 
-// three.js is heavy: load it only on the client, after first paint,
-// so the gate and connect screens stay instant.
+// three.js is heavy: load it only on the client, after first paint.
 const Turtle3D = dynamic(() => import("./components/Turtle3D"), {
   ssr: false,
   loading: () => <span className={styles.turtle3dLoading}>🐢</span>,
@@ -42,15 +54,10 @@ type Env = "checking" | "inside" | "outside";
 type Scene = ActionKey | null;
 type LbRow = { address: string; xp: number };
 
-// Optional ERC-8021 builder-code suffix (Base Dashboard -> Builder Codes
-// -> Encoded String). Attributes transactions to the builder.
-const BUILDER_SUFFIX = (process.env.NEXT_PUBLIC_BUILDER_SUFFIX ?? "").replace(
-  /^0x/,
-  "",
-);
-
+/** Action marker + ERC-8021 builder-code suffix. */
 function txData(kind: string): `0x${string}` {
-  return (stringToHex(`basedturtle:${kind}`) + BUILDER_SUFFIX) as `0x${string}`;
+  return (stringToHex(`basedturtle:${kind}`) +
+    DATA_SUFFIX.slice(2)) as `0x${string}`;
 }
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -58,6 +65,7 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 export default function Home() {
   /* ------------------------- environment gate ------------------------ */
   const [env, setEnv] = useState<Env>("checking");
+  const [mutedUi, setMutedUi] = useState(false);
 
   useEffect(() => {
     sound.loadMuted();
@@ -81,6 +89,8 @@ export default function Home() {
   const { connect, connectors, isPending: connecting } = useConnect();
   const { signMessageAsync } = useSignMessage();
   const { sendTransactionAsync } = useSendTransaction();
+  const { sendCallsAsync } = useSendCalls();
+  const { data: balance } = useBalance({ address, chainId: base.id });
   const autoConnectTried = useRef(false);
 
   useEffect(() => {
@@ -166,7 +176,6 @@ export default function Home() {
   const sceneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [levelUpTo, setLevelUpTo] = useState<number | null>(null);
   const prevLevel = useRef<number | null>(null);
-  const [mutedUi, setMutedUi] = useState(false);
 
   const playScene = useCallback((key: ActionKey) => {
     setScene(key);
@@ -195,23 +204,44 @@ export default function Home() {
   }, []);
 
   /* ------------------------- onchain actions ------------------------- */
+  /* With a paymaster configured, calls are sponsored and players pay
+     nothing. Without one, a transaction needs a little ETH on Base, so
+     we check the balance first and quietly fall back to offchain rather
+     than throwing a wallet error at the player. */
 
   const sendGameTx = useCallback(
     async (kind: string): Promise<string | null> => {
       if (!address) return null;
+      const data = txData(kind);
       try {
-        const hash = await sendTransactionAsync({
+        if (PAYMASTER_URL) {
+          const { id } = await sendCallsAsync({
+            calls: [{ to: address, value: BigInt(0), data }],
+            capabilities: { paymasterService: { url: PAYMASTER_URL } },
+          });
+          const result = await waitForCallsStatus(config, {
+            id,
+            timeout: 30_000,
+          });
+          const hash = result.receipts?.[0]?.transactionHash;
+          return hash ?? null;
+        }
+        if (!balance || balance.value === BigInt(0)) return null;
+        return await sendTransactionAsync({
           to: address,
           value: BigInt(0),
-          data: txData(kind),
+          data,
         });
-        return hash;
       } catch {
-        return null; // rejected or no gas: caller decides the fallback
+        return null; // rejected, out of gas, or paymaster declined
       }
     },
-    [address, sendTransactionAsync],
+    [address, balance, sendCallsAsync, sendTransactionAsync],
   );
+
+  const gasless = Boolean(PAYMASTER_URL);
+  const hasGas = Boolean(balance && balance.value > BigInt(0));
+  const canGoOnchain = gasless || hasGas;
 
   const doAction = useCallback(
     async (key: ActionKey) => {
@@ -220,7 +250,9 @@ export default function Home() {
       setNote("");
       try {
         const hash = await sendGameTx(key);
-        if (!hash) setNote("Off-chain fallback: half XP this time.");
+        if (!hash && canGoOnchain) {
+          setNote("Transaction skipped: half XP this time.");
+        }
         const res = await fetch("/api/game/action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -244,7 +276,7 @@ export default function Home() {
         setBusy(null);
       }
     },
-    [busy, sendGameTx, acceptState, playScene],
+    [busy, sendGameTx, canGoOnchain, acceptState, playScene],
   );
 
   const doGm = useCallback(async () => {
@@ -253,10 +285,6 @@ export default function Home() {
     setNote("");
     try {
       const hash = await sendGameTx("gm");
-      if (!hash) {
-        setNote("GM needs a transaction. Try again.");
-        return;
-      }
       const res = await fetch("/api/game/gm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -264,13 +292,19 @@ export default function Home() {
       });
       const data = (await res.json()) as {
         ok: boolean;
+        onchain?: boolean;
         state?: GameState;
         now?: number;
       };
       if (data.state && data.now) {
         acceptState({ state: data.state, now: data.now });
       }
-      if (data.ok) sound.playGm();
+      if (data.ok) {
+        sound.playGm();
+        if (!data.onchain) {
+          setNote("GM saved offchain. Add a little ETH on Base for full XP.");
+        }
+      }
     } catch {
       setNote("GM didn't reach the server. Try again.");
     } finally {
@@ -284,26 +318,100 @@ export default function Home() {
     top: LbRow[];
     me: { address: string; rank: number | null; xp: number };
   } | null>(null);
+  const [lbError, setLbError] = useState("");
 
   const openLb = useCallback(async () => {
     setLbOpen(true);
+    setLb(null);
+    setLbError("");
     sound.playPop();
     try {
       const res = await fetch("/api/game/leaderboard", { cache: "no-store" });
-      if (res.ok) {
-        setLb(
-          (await res.json()) as {
-            top: LbRow[];
-            me: { address: string; rank: number | null; xp: number };
-          },
-        );
-      }
+      if (!res.ok) throw new Error("lb failed");
+      setLb(
+        (await res.json()) as {
+          top: LbRow[];
+          me: { address: string; rank: number | null; xp: number };
+        },
+      );
     } catch {
-      /* panel simply stays in loading state */
+      setLbError("Couldn't load the leaderboard. Try again in a moment.");
     }
   }, []);
 
-  /* ---------------------------- mini-game ---------------------------- */
+  /* ------------------------------ taps ------------------------------- */
+  /* Taps are batched: the counter climbs instantly on screen and is
+     flushed to the server shortly after the player stops tapping. */
+  const [pendingTaps, setPendingTaps] = useState(0);
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [coinPop, setCoinPop] = useState(0);
+
+  const flushTaps = useCallback(async () => {
+    const count = pendingTaps;
+    if (count <= 0) return;
+    setPendingTaps(0);
+    try {
+      const res = await fetch("/api/game/tap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taps: count }),
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { state: GameState; now: number };
+      acceptState(data);
+    } catch {
+      /* the taps are lost, not the game */
+    }
+  }, [pendingTaps, acceptState]);
+
+  const [bounce, setBounce] = useState(false);
+  const bounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const tapTurtle = useCallback(() => {
+    setBounce(true);
+    sound.playPop();
+    if (bounceTimer.current) clearTimeout(bounceTimer.current);
+    bounceTimer.current = setTimeout(() => setBounce(false), 400);
+
+    setPendingTaps((n) => n + 1);
+    setCoinPop((n) => n + 1);
+    setTimeout(() => setCoinPop((n) => Math.max(0, n - 1)), 900);
+
+    if (flushTimer.current) clearTimeout(flushTimer.current);
+    flushTimer.current = setTimeout(() => void flushTaps(), 900);
+  }, [flushTaps]);
+
+  /* ------------------------------ shop -------------------------------- */
+  const [shopOpen, setShopOpen] = useState(false);
+  const [shopBusy, setShopBusy] = useState<string | null>(null);
+
+  const shopAction = useCallback(
+    async (action: "buy" | "equip", id: string) => {
+      setShopBusy(id);
+      try {
+        const res = await fetch("/api/game/shop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, id }),
+        });
+        const data = (await res.json()) as {
+          ok: boolean;
+          reason?: string;
+          state: GameState;
+          now: number;
+        };
+        if (data.state && data.now) acceptState(data);
+        if (data.ok) sound.playPop();
+      } catch {
+        /* keep the panel open, nothing changed */
+      } finally {
+        setShopBusy(null);
+      }
+    },
+    [acceptState],
+  );
+
+  /* ---------------------------- mini-game ----------------------------- */
   const [jumpOpen, setJumpOpen] = useState(false);
 
   const submitMinigame = useCallback(
@@ -329,27 +437,18 @@ export default function Home() {
     [acceptState],
   );
 
-  /* --------------------------- 1s ui clock --------------------------- */
+  /* --------------------------- 1s ui clock ---------------------------- */
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const [bounce, setBounce] = useState(false);
-  const bounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wobble = useCallback(() => {
-    setBounce(true);
-    sound.playPop();
-    if (bounceTimer.current) clearTimeout(bounceTimer.current);
-    bounceTimer.current = setTimeout(() => setBounce(false), 600);
-  }, []);
-
   const copyLink = useCallback(() => {
     navigator.clipboard?.writeText("https://basedturtle.com").catch(() => {});
   }, []);
 
-  /* ------------------------------ screens ---------------------------- */
+  /* ------------------------------ screens ----------------------------- */
 
   if (env === "checking") {
     return (
@@ -431,21 +530,24 @@ export default function Home() {
     );
   }
 
-  /* ------------------------------- game ------------------------------ */
+  /* ------------------------------- game ------------------------------- */
 
   const { level, into, next } = levelInfo(state.xp);
   const serverNow = Date.now() + serverDelta.current;
   const gmDone = state.lastGm === todayKey();
   const boost = streakBoostPct(state.streak);
+  const mood = moodKey(state.stats);
+  const coinsShown = state.coins + pendingTaps;
 
   const bars: { label: string; value: number; barClass: string }[] = [
     { label: "FOOD", value: state.stats.food, barClass: styles.barFood },
     { label: "CLEAN", value: state.stats.clean, barClass: styles.barClean },
     { label: "ENERGY", value: state.stats.energy, barClass: styles.barEnergy },
+    { label: "ACTIVITY", value: state.stats.fun, barClass: styles.barFun },
   ];
 
   return (
-    <main className={styles.page}>
+    <main className={`${styles.page} ${styles[`bg_${state.background}`] ?? ""}`}>
       <header className={styles.header}>
         <div>
           <h1 className={styles.wordmark}>BASED TURTLE</h1>
@@ -460,6 +562,21 @@ export default function Home() {
               🔥 {state.streak}
               {boost > 0 ? ` · +${boost}%` : ""}
             </span>
+            <span className={styles.coinChip}>
+              🪙 {coinsShown}
+              {coinPop > 0 && <span className={styles.coinPop}>+{coinPop}</span>}
+            </span>
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={() => {
+                setShopOpen(true);
+                sound.playPop();
+              }}
+              aria-label="Shop"
+            >
+              🛍️
+            </button>
             <button
               type="button"
               className={styles.iconButton}
@@ -486,13 +603,17 @@ export default function Home() {
           className={`${styles.turtleButton} ${styles.turtle3dWrap} ${
             bounce ? styles.turtleBounce : ""
           } ${levelUpTo ? styles.turtleGrow : ""}`}
-          onClick={wobble}
-          aria-label="Pet the turtle"
+          onClick={tapTurtle}
+          aria-label="Tap the turtle to earn coins"
         >
           <Turtle3D level={level} />
         </button>
       </section>
-      <p className={styles.mood}>{moodLine(state.stats)}</p>
+
+      <p className={styles.mood}>
+        <span className={styles.moodFace}>{moodFace(mood)}</span>{" "}
+        {moodLine(state.stats)}
+      </p>
 
       {!gmDone && (
         <button
@@ -501,7 +622,9 @@ export default function Home() {
           disabled={busy !== null}
           onClick={doGm}
         >
-          {busy === "gm" ? "Confirming onchain…" : "⛅ Daily GM · keep the streak"}
+          {busy === "gm"
+            ? "Confirming…"
+            : `⛅ Daily GM · keep the streak${gasless ? " · free" : ""}`}
         </button>
       )}
 
@@ -536,7 +659,11 @@ export default function Home() {
             >
               <span className={styles.actionEmoji}>{action.emoji}</span>
               <span className={styles.actionLabel}>
-                {isBusy ? "onchain…" : onCooldown ? formatCooldown(waitMs) : action.label}
+                {isBusy
+                  ? "…"
+                  : onCooldown
+                    ? formatCooldown(waitMs)
+                    : action.label}
               </span>
             </button>
           );
@@ -551,7 +678,7 @@ export default function Home() {
           setJumpOpen(true);
         }}
       >
-        🪷 Play Turtle Jump · earn XP
+        🪷 Play Turtle Jump · earn XP & coins
       </button>
 
       {note && <p className={styles.error}>{note}</p>}
@@ -622,6 +749,61 @@ export default function Home() {
         </div>
       )}
 
+      {shopOpen && (
+        <div className={styles.lbOverlay} onClick={() => setShopOpen(false)}>
+          <div className={styles.lbPanel} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.lbHead}>
+              <span>🛍️ SHOP · 🪙 {state.coins}</span>
+              <button
+                type="button"
+                className={styles.iconButton}
+                onClick={() => setShopOpen(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <p className={styles.shopHint}>
+              Tap your turtle to earn coins. 1 tap = 1 coin.
+            </p>
+            <ul className={styles.shopList}>
+              {BACKGROUNDS.map((item) => {
+                const owned = state.backgrounds.includes(item.id);
+                const active = state.background === item.id;
+                const affordable = state.coins >= item.price;
+                return (
+                  <li key={item.id} className={styles.shopRow}>
+                    <span className={styles.shopEmoji}>{item.emoji}</span>
+                    <span className={styles.shopName}>{item.name}</span>
+                    {active ? (
+                      <span className={styles.shopActive}>active</span>
+                    ) : owned ? (
+                      <button
+                        type="button"
+                        className={styles.shopBtn}
+                        disabled={shopBusy !== null}
+                        onClick={() => shopAction("equip", item.id)}
+                      >
+                        Use
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.shopBtn}
+                        disabled={!affordable || shopBusy !== null}
+                        onClick={() => shopAction("buy", item.id)}
+                      >
+                        🪙 {item.price}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {lbOpen && (
         <div className={styles.lbOverlay} onClick={() => setLbOpen(false)}>
           <div className={styles.lbPanel} onClick={(e) => e.stopPropagation()}>
@@ -636,8 +818,14 @@ export default function Home() {
                 ✕
               </button>
             </div>
-            {!lb ? (
+            {lbError ? (
+              <p className={styles.error}>{lbError}</p>
+            ) : !lb ? (
               <p className={styles.centerText}>Loading…</p>
+            ) : lb.top.length === 0 ? (
+              <p className={styles.centerText}>
+                No turtles ranked yet. Feed yours and be the first!
+              </p>
             ) : (
               <>
                 <ul className={styles.lbList}>
@@ -645,7 +833,8 @@ export default function Home() {
                     <li
                       key={row.address}
                       className={`${styles.lbRow} ${
-                        address && row.address.toLowerCase() === address.toLowerCase()
+                        address &&
+                        row.address.toLowerCase() === address.toLowerCase()
                           ? styles.lbMe
                           : ""
                       }`}
@@ -668,6 +857,7 @@ export default function Home() {
           </div>
         </div>
       )}
+
       {jumpOpen && (
         <TurtleJump
           onClose={() => setJumpOpen(false)}
